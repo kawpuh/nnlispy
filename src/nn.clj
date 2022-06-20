@@ -91,9 +91,6 @@
                                                 [weights- biases-]
                                                 training-batches)
            scaling-factor (- (/ eta mini-batch-size))]
-       (println "biases")
-       (pp/pprint nabla-biases)
-       (println)
        [(map m/add-scaled weights- nabla-weights (repeat scaling-factor))
         (map m/add-scaled biases- nabla-biases (repeat scaling-factor))])))
   (nth (iterate do-epoch [weights biases]) epochs))
@@ -148,7 +145,6 @@
       [weights biases] trained-net]
   ; [(feedforward trained-net x) y]
   ; (pp/pprint (evaluate trained-net (take 20 fake-data)))
-  (pp/pprint (evaluate trained-net train-data))
-  )
+  (pp/pprint (evaluate trained-net train-data)))
 
 ; (pp/pprint (second trained-net))
