@@ -39,7 +39,8 @@
 
 (defn feedforward [[weights biases] xv] ; => yv
   (reduce
-   (fn [av [wm bv]] (m/emap sigmoid (m/add bv (m/inner-product wm av))))
+   (fn [av [wm bv]]
+     (m/emap sigmoid (m/add bv (m/inner-product wm av))))
    xv
    (map vector weights biases)))
 
@@ -74,25 +75,24 @@
   (-> (forward)
       (backward)))
 
-(defn train-mini-batch [[weights biases] training-batch]
-  (reduce (fn [[sigma-nabla-weights sigma-nabla-biases] [x y]]
-            (let [[nabla-weights nabla-biases] (backprop [weights biases] x y)]
-              [(map m/add sigma-nabla-weights nabla-weights)
-               (map m/add sigma-nabla-biases nabla-biases)]))
-          [(map (comp m/new-array m/shape) weights)
-           (map (comp m/new-array m/shape) biases)]
-          training-batch))
+(defn train-mini-batch [scaling-factor net training-batch]
+  (reduce
+   (fn [[weights biases] [x y]]
+     (let [[nabla-weights nabla-biases] (backprop [weights biases] x y)]
+       [(map m/add-scaled weights nabla-weights (repeat scaling-factor))
+        (map m/add-scaled biases nabla-biases (repeat scaling-factor))]))
+   net
+   training-batch))
 
 (defn sgd [[weights biases] training-data epochs mini-batch-size eta]
   (defn do-epoch [[weights- biases-]]
     (time
      (let [training-batches (partition mini-batch-size (shuffle training-data))
-           [nabla-weights nabla-biases] (reduce train-mini-batch
-                                                [weights- biases-]
-                                                training-batches)
            scaling-factor (- (/ eta mini-batch-size))]
-       [(map m/add-scaled weights- nabla-weights (repeat scaling-factor))
-        (map m/add-scaled biases- nabla-biases (repeat scaling-factor))])))
+       (reduce
+        (partial train-mini-batch scaling-factor)
+        [weights- biases-]
+        training-batches))))
   (nth (iterate do-epoch [weights biases]) epochs))
 
 (defn translate-output [output-vector]
@@ -102,7 +102,7 @@
 (defn evaluate [[weights biases] test-data]
   (reduce (fn [results [x y]]
             (let [res (feedforward [weights biases] x)]
-              (conj results [[(translate-output res) (seq res)]
+              (conj results [[(translate-output res) (m/emax res)]
                              (translate-output y)])))
           []
           test-data))
@@ -129,22 +129,18 @@
    csv))
 
 (def train-csv (rest (load-mnist-train)))
-(def train-data (doall (convert-csv train-csv)))
+(def train-data (convert-csv train-csv))
 (def fake-data (repeat 10 (first train-data)))
 (println "fake data has all: " (translate-output (second (first fake-data))))
 
+; (pp/pprint (network [784 30 10]))
+
 (println "starting training")
-
 (def trained-net (-> (network [784 30 10])
-                     (sgd train-data 50 10 0.5)
+                     (sgd train-data 10 10 3)
                      (vec)))
-
 (println "done")
 
 (let [[x y] (first train-data)
       [weights biases] trained-net]
-  ; [(feedforward trained-net x) y]
-  ; (pp/pprint (evaluate trained-net (take 20 fake-data)))
   (pp/pprint (evaluate trained-net train-data)))
-
-; (pp/pprint (second trained-net))
