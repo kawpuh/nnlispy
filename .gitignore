@@ -2,3 +2,4 @@ mnist
 .clj-kondo
 .cpcache
 .lsp
+.nrepl-port

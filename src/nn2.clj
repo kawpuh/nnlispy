@@ -1,7 +1,9 @@
-(ns nn
+(ns nn2
   (:require [clojure.core.matrix :as m]
             [clojure.core.matrix.random :as rand]
             ; [meta-csv.core :as csv]
+            ; [denisovan.core]
+            ; [clatrix.core]
             [clojure.java.io :as io]
             [tech.v3.datatype.char-input :as ch]
             [clojure.pprint :as pp]))
@@ -10,22 +12,26 @@
 
 ;; somethings to keep in mind:
 ;; weights is a vector of matrices, one for each layer
-;; biases is a vector of vectors, one for each layer
-;; ws is one of the matrices in weights
-;; bs is one of the vectors in biases
 
 ;; generally things are named by the following convention
-;; 2 letter pairs:
+;; irregular (non-ndarray) collections are denoted by a word
+;; ndarrays are denoted by 2 letter pairs such that
 ;; first letter describe the contents
 ;; second letter describes the type:
 ;; t - tensor, m - matrix, v - vector
 
 (defn network [sizes]
-  (let [biases (doall (map (comp m/array rand/sample-normal) (rest sizes)))
-        weights (doall (map
-                        (comp m/matrix rand/sample-normal)
-                        (map vector (rest sizes) (butlast sizes))))]
+  (let [biases (map rand/sample-normal (rest sizes))
+        weights (map (fn [[n m]] (m/scale (rand/sample-normal [n m]) (/ 1 m)))
+                            (map vector (rest sizes) (butlast sizes)))]
     [weights biases]))
+
+(defn coerce-num [n]
+  (cond
+    (= n ##-Inf) Float/MIN_VALUE
+    (= n ##Inf) Float/MAX_VALUE
+    (Float/isNaN n) 0
+    :else n))
 
 (defn sigmoid [z]
   (->> z
@@ -36,6 +42,10 @@
 
 (defn sigmoid' [z]
   (* (sigmoid z) (- 1 (sigmoid z))))
+
+(def cost-fn
+  {:quadratic {:delta (fn [zm av yv] (m/mul (m/sub av yv) (m/emap sigmoid' zm)))}
+   :cross-entropy {:delta (fn [_zm av yv] (m/sub av yv))}})
 
 (defn feedforward [[weights biases] xv] ; => yv
   (reduce
@@ -55,8 +65,10 @@
     (let [r-zm (reverse zm)
           r-weights (reverse weights)
           r-am (reverse am)
-          delta-0 (m/mul (m/sub (first r-am) yv)
-                         (m/emap sigmoid' (first r-zm)))]
+          delta-0 ((get-in cost-fn [:cross-entropy :delta])
+                   (first r-zm)
+                   (first r-am)
+                   yv)]
       (reduce (fn [[nabla-weights nabla-biases] [zv wm av]]
                 (let [delta- (first nabla-biases)
                       delta (m/mul
@@ -64,10 +76,10 @@
                              (m/emap sigmoid' zv))]
                   [(conj nabla-weights (m/outer-product delta av))
                    (conj nabla-biases delta)]))
-                ;; initial value
+              ;; initial value
               [(list (m/outer-product delta-0 (second r-am)))
                (list delta-0)]
-                ;; reduction coll
+              ;; reduction coll
               (map vector
                    (rest r-zm)
                    r-weights
@@ -100,12 +112,11 @@
    (apply max-key second (map-indexed vector output-vector))))
 
 (defn evaluate [[weights biases] test-data]
-  (reduce (fn [results [x y]]
-            (let [res (feedforward [weights biases] x)]
-              (conj results [[(translate-output res) (m/emax res)]
-                             (translate-output y)])))
-          []
-          test-data))
+  (mapv
+    (fn [[x y]]
+      (let [res (feedforward [weights biases] x)]
+        [[(translate-output res) (m/emax res)] (translate-output y)]))
+    test-data))
 
 (defn load-mnist-train []
   (with-open [reader (io/reader "./mnist/mnist_train.csv")]
@@ -115,7 +126,7 @@
 (defn load-mnist-test []
   (with-open [reader (io/reader "./mnist/mnist_test.csv")]
     (doall
-      (ch/read-csv-compat reader))))
+     (ch/read-csv-compat reader))))
 
 (defn one-hot-encode [n]
   (assert (<= 0 n 9))
@@ -138,8 +149,8 @@
                    (convert-csv)))
 
 (println "starting training")
-(def trained-net (-> (network [784 30 10])
-                     (sgd train-data 10 10 3)
+(def trained-net (-> (network [784 100 10])
+                     (sgd train-data 10 10 0.5)
                      (vec)))
 (println "done")
 
