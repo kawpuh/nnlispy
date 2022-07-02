@@ -4,6 +4,7 @@
             ; [meta-csv.core :as csv]
             ; [denisovan.core]
             ; [clatrix.core]
+            ; [clojure.core.async :as async]
             [clojure.java.io :as io]
             [tech.v3.datatype.char-input :as ch]
             [clojure.pprint :as pp]))
@@ -88,17 +89,34 @@
   (-> (forward)
       (backward)))
 
+; (async/<!!
+;  (async/transduce
+;   (map (partial backprop [weights biases]))
+;   (completing
+;    (fn [[nabla-weights nabla-biases] [dnabla-weights dnabla-biases]]
+;      [(map m/add nabla-weights dnabla-weights)
+;       (map m/add nabla-biases dnabla-biases)]))
+;   [(map (comp m/new-array m/shape) weights)
+;    (map (comp m/new-array m/shape) biases)]
+;   (async/to-chan! training-batch)))
+
+; (reduce
+;   (fn nabla-sum [[nabla-weights nabla-biases] [dnabla-weights dnabla-biases]]
+;     [(map m/add nabla-weights dnabla-weights)
+;      (map m/add nabla-biases dnabla-biases)])
+;   (pmap (partial backprop [weights biases]) training-batch))
+
 (defn parameterize-mini-batch-fn [eta mini-batch-size scaled-reg-parameter]
   (let [nabla-scaling (- (/ eta mini-batch-size))
         l2-weight-scaling (- 1 (* eta scaled-reg-parameter))]
-    (fn train-mini-batch [[weights biases :as net] training-batch]
+    (fn train-mini-batch [[weights biases] training-batch]
       (let [[nabla-weights nabla-biases]
             (reduce
-             (fn [[nabla-weights nabla-biases] [dnabla-weights dnabla-biases]]
-               [(map m/add nabla-weights dnabla-weights)
+             (fn nabla-sum [[nabla-weights nabla-biases] [dnabla-weights dnabla-biases]]
+               [(pmap m/add nabla-weights dnabla-weights)
                 (map m/add nabla-biases dnabla-biases)])
-             (map (partial backprop net) training-batch))]
-        [(map m/scale-add weights (repeat l2-weight-scaling)
+             (pmap (partial backprop [weights biases]) training-batch))]
+        [(pmap m/scale-add weights (repeat l2-weight-scaling)
               nabla-weights (repeat nabla-scaling))
          (map m/add-scaled biases nabla-biases (repeat nabla-scaling))]))))
 
@@ -140,7 +158,7 @@
     (if (= i n) 1 0)))
 
 (defn convert-csv [csv]
-  (map
+  (pmap
    (fn [row]
      [(m/array (map (fn [i] (/ (Integer/parseInt i) 255)) (rest row)))
       (m/array (one-hot-encode (Integer/parseInt (first row))))])
@@ -157,12 +175,12 @@
         trained-net (do
                       (println "starting training")
                       (time
-                       (-> (network [784 30 10])
+                       (-> (network [784 100 10])
                            (sgd train-data
-                                {:epochs 30
+                                {:epochs 60
                                  :mini-batch-size 10
-                                 :eta 3.0
-                                 :lambda 0.0})
+                                 :eta 0.2
+                                 :lambda 5.0})
                            (vec))))
         results (evaluate trained-net test-data)
         tally (->> results
