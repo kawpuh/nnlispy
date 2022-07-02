@@ -22,8 +22,9 @@
 
 (defn network [sizes]
   (let [biases (map rand/sample-normal (rest sizes))
-        weights (map (fn [[n m]] (m/scale (rand/sample-normal [n m]) (/ 1 m)))
-                            (map vector (rest sizes) (butlast sizes)))]
+        weights (map
+                 (fn [[n m]] (m/scale (rand/sample-normal [n m]) (/ 1 (Math/sqrt m))))
+                 (map vector (rest sizes) (butlast sizes)))]
     [weights biases]))
 
 (defn coerce-num [n]
@@ -54,7 +55,7 @@
    xv
    (map vector weights biases)))
 
-(defn backprop [[weights biases] xv yv] ; => [nabla-w nabla-b]
+(defn backprop [[weights biases] [xv yv]] ; => [nabla-w nabla-b]
   (defn forward [] ; => [zm am]
     (reduce (fn [[zs as] [wm bv]]
               (let [zv (m/add bv (m/inner-product wm (last as)))]
@@ -87,22 +88,27 @@
   (-> (forward)
       (backward)))
 
-(defn train-mini-batch [scaling-factor net training-batch]
-  (reduce
-   (fn [[weights biases] [x y]]
-     (let [[nabla-weights nabla-biases] (backprop [weights biases] x y)]
-       [(map m/add-scaled weights nabla-weights (repeat scaling-factor))
-        (map m/add-scaled biases nabla-biases (repeat scaling-factor))]))
-   net
-   training-batch))
+(defn parameterize-mini-batch-fn [eta mini-batch-size scaled-reg-parameter]
+  (let [nabla-scaling (- (/ eta mini-batch-size))
+        l2-weight-scaling (- 1 (* eta scaled-reg-parameter))]
+    (fn train-mini-batch [[weights biases :as net] training-batch]
+      (let [[nabla-weights nabla-biases]
+            (reduce
+             (fn [[nabla-weights nabla-biases] [dnabla-weights dnabla-biases]]
+               [(map m/add nabla-weights dnabla-weights)
+                (map m/add nabla-biases dnabla-biases)])
+             (map (partial backprop net) training-batch))]
+        [(map m/scale-add weights (repeat l2-weight-scaling)
+              nabla-weights (repeat nabla-scaling))
+         (map m/add-scaled biases nabla-biases (repeat nabla-scaling))]))))
 
-(defn sgd [[weights biases] training-data epochs mini-batch-size eta]
+(defn sgd [[weights biases] training-data {:keys [epochs mini-batch-size eta lambda]}]
   (defn do-epoch [[weights- biases-]]
     (time
-     (let [training-batches (partition mini-batch-size (shuffle training-data))
-           scaling-factor (- (/ eta mini-batch-size))]
+     (let [scaled-reg-parameter (/ lambda (count training-data))
+           training-batches (partition mini-batch-size (shuffle training-data))]
        (reduce
-        (partial train-mini-batch scaling-factor)
+        (parameterize-mini-batch-fn eta mini-batch-size scaled-reg-parameter)
         [weights- biases-]
         training-batches))))
   (nth (iterate do-epoch [weights biases]) epochs))
@@ -113,10 +119,10 @@
 
 (defn evaluate [[weights biases] test-data]
   (mapv
-    (fn [[x y]]
-      (let [res (feedforward [weights biases] x)]
-        [[(translate-output res) (m/emax res)] (translate-output y)]))
-    test-data))
+   (fn [[x y]]
+     (let [res (feedforward [weights biases] x)]
+       [[(translate-output res) (m/emax res)] (translate-output y)]))
+   test-data))
 
 (defn load-mnist-train []
   (with-open [reader (io/reader "./mnist/mnist_train.csv")]
@@ -140,22 +146,27 @@
       (m/array (one-hot-encode (Integer/parseInt (first row))))])
    csv))
 
-(def train-data (-> (load-mnist-train)
-                    (rest)
-                    (convert-csv)))
+(defn -main [& args]
+  (let [train-data (-> (load-mnist-train)
+                       (rest)
+                       (convert-csv))
 
-(def test-data (-> (load-mnist-test)
-                   (rest)
-                   (convert-csv)))
+        test-data (-> (load-mnist-test)
+                      (rest)
+                      (convert-csv))
+        trained-net (do
+                      (println "starting training")
+                      (time
+                       (-> (network [784 30 10])
+                           (sgd train-data
+                                {:epochs 30
+                                 :mini-batch-size 10
+                                 :eta 3.0
+                                 :lambda 0.0})
+                           (vec))))
+        results (evaluate trained-net test-data)
+        tally (->> results
+                   (map (fn [[[guess _activation] answer]] (= guess answer)))
+                   (frequencies))]
+    (pp/pprint tally)))
 
-(println "starting training")
-(def trained-net (-> (network [784 100 10])
-                     (sgd train-data 10 10 0.5)
-                     (vec)))
-(println "done")
-
-(let [results (evaluate trained-net test-data)
-      tally (->> results
-                 (map (fn [[[guess _activation] answer]] (= guess answer)))
-                 (frequencies))]
-  (pp/pprint tally))
