@@ -8,4 +8,8 @@ The easiest way I could find to get my hands on the MNIST dataset was from [Kagg
 # Thoughts
 - lazy evaluation and easy concurrency with pmap is nice
 - core.matrix with the vectorz implementation is fast
-- however clojure in general (and vectorz) is built around doubles, pretty much impossible to use single-precision floats
+- however vectorz is built around doubles
+  - losing some speed since we can't take advantage of SIMD instructions with 2x parallelism for fp32 vs fp64
+- should use CUDA anyways 
+  - for my hardware we'd have theoretical ~10x performance on CUDA using fp32
+- in general fp32 is awkward in clojure because builtin math operations convert to clojure.lang.Number which uses double-precision floats
