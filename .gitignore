@@ -3,3 +3,4 @@ mnist
 .cpcache
 .lsp
 .nrepl-port
+hy/data/MNIST/
