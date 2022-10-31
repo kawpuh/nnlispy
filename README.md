@@ -14,6 +14,7 @@ The easiest way I could find to get my hands on the MNIST dataset was from [Kagg
   - for my hardware we'd have theoretical ~10x performance on CUDA using fp32
 - in general fp32 is awkward in clojure because builtin math operations convert to clojure.lang.Number which uses double-precision floats
 
-- now I did a hy/pytorch translation which was pretty straightforward and almost verbatim from a pytorch example. 
+# nnhy
+- after that I did a hy/pytorch translation which was pretty straightforward and almost verbatim from a pytorch example. 
 - Pretty much boilerplate + (nn.Sequential (nn.Linear 784 100) (nn.Sigmoid) (nn.Linear 100 10) (nn.Sigmoid))
 - the real clojure way would be to use libpython-clj
