@@ -4,3 +4,4 @@ mnist
 .lsp
 .nrepl-port
 hy/data/MNIST/
+__pycache__
