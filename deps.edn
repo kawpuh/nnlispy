@@ -2,5 +2,7 @@
         meta-csv/meta-csv {:mvn/version "0.1.0"}
         org.clojure/core.async {:mvn/version "1.5.648"}
         cnuernber/dtype-next {:mvn/version "9.028"}
-        net.mikera/vectorz-clj {:mvn/version "0.48.0"}}
+        net.mikera/vectorz-clj {:mvn/version "0.48.0"}
+        org.jcuda/jcuda {:mvn/version "11.8.0"}
+        org.jcuda/jcublas {:mvn/version "11.8.0"}}
  :paths ["src/nn"]}
