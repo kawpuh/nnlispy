@@ -1,7 +1,7 @@
 (ns gamir
   (:require
-    ; [clojure.core.matrix :as m]
-    ; [clojure.core.matrix.random :as rand]
+   [clojure.core.matrix :as m]
+   [clojure.core.matrix.random :as rand]
     ; [meta-csv.core :as csv]
     ; [denisovan.core]
     ; [clatrix.core]
@@ -22,33 +22,33 @@
 ;; second letter describes the type:
 ;; t - tensor, m - matrix, v - vector
 
-; (defn network [sizes]
-;   (let [biases (map rand/sample-normal (rest sizes))
-;         weights (map
-;                  (fn [[n m]] (m/scale (rand/sample-normal [n m]) (/ 1 (Math/sqrt m))))
-;                  (map vector (rest sizes) (butlast sizes)))]
-;     [weights biases]))
+(defn network [sizes]
+  (let [biases (map rand/sample-normal (rest sizes))
+        weights (map
+                 (fn [[n m]] (m/scale (rand/sample-normal [n m]) (/ 1 (Math/sqrt m))))
+                 (map vector (rest sizes) (butlast sizes)))]
+    [weights biases]))
 
-; (defn sigmoid [z]
-;   (->> z
-;        (-)
-;        Math/exp
-;        (+ 1)
-;        (/ 1)))
+(defn sigmoid [z]
+  (->> z
+       (-)
+       Math/exp
+       (+ 1)
+       (/ 1)))
 
-; (defn sigmoid' [z]
-;   (* (sigmoid z) (- 1 (sigmoid z))))
+(defn sigmoid' [z]
+  (* (sigmoid z) (- 1 (sigmoid z))))
 
 ; (def cost-fn
 ;   {:quadratic {:delta (fn [zm av yv] (m/mul (m/sub av yv) (m/emap sigmoid' zm)))}
 ;    :cross-entropy {:delta (fn [_zm av yv] (m/sub av yv))}})
 
-; (defn feedforward [[weights biases] xv] ; => yv
-;   (reduce
-;    (fn [av [wm bv]]
-;      (m/emap sigmoid (m/add bv (m/inner-product wm av))))
-;    xv
-;    (map vector weights biases)))
+(defn feedforward [[weights biases] xv] ; => yv
+  (reduce
+   (fn [av [wm bv]]
+     (m/emap sigmoid (m/add bv (m/inner-product wm av))))
+   xv
+   (map vector weights biases)))
 
 ; (defn backprop [[weights biases] [xv yv]] ; => [nabla-w nabla-b]
 ;   (defn forward [] ; => [zm am]
@@ -108,15 +108,15 @@
 ;         training-batches))))
 ;   (nth (iterate do-epoch [weights biases]) epochs))
 
-; (defn translate-output [output-vector]
-;   (first
-;    (apply max-key second (map-indexed vector output-vector))))
+(defn index-max [output-vector]
+  (first
+   (apply max-key second (map-indexed vector output-vector))))
 
 ; (defn evaluate [[weights biases] test-data]
 ;   (mapv
 ;    (fn [[x y]]
 ;      (let [res (feedforward [weights biases] x)]
-;        [[(translate-output res) (m/emax res)] (translate-output y)]))
+;        [[(index-max res) (m/emax res)] (translate-output y)]))
 ;    test-data))
 
 ; (defn load-mnist-train []
@@ -129,10 +129,11 @@
 ;     (doall
 ;      (ch/read-csv-compat reader))))
 
-; (defn one-hot-encode [n]
-;   (assert (<= 0 n 9))
-;   (for [i (range 10)]
-;     (if (= i n) 1 0)))
+(defn one-hot-encode
+  ([hot-i] (one-hot-encode hot-i 9))
+  ([hot-i n]
+   (for [i (range n)]
+     (if (= i hot-i) 1 0))))
 
 ; (defn convert-csv [csv]
 ;   (pmap
@@ -141,8 +142,13 @@
 ;       (m/array (one-hot-encode (Integer/parseInt (first row))))])
 ;    csv))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Game Impl
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defn new-board []
-  [[0 0 0] [0 0 0] [0 0 0]])
+  ; [[0 0 0] [0 0 0] [0 0 0]]
+  (m/matrix [[0 0 0] [0 0 0] [0 0 0]]))
 
 (defn gameover? [board]
   (some #(or (= % [1 1 1])
@@ -168,6 +174,7 @@
     -1 "o"))
 
 (defn display-as-board [board]
+  ;; takes arbitary 3x3
   (->> board
        (map #(interpose "|" %)) ;; add vertical lines in board
        (map (partial apply str))
@@ -176,6 +183,7 @@
        (apply str)))
 
 (defn display-board [board]
+  ;; takes 3x3 with computer values #{0 1 -1}
   (->> board
        (map (partial map human-readable-vals)) ;; translate
        display-as-board))
@@ -212,7 +220,7 @@
         (not (valid-move? board n)) (do (println "Invalid move") (recur))
         :else (play-move board player-turn n)))))
 
-(defn -main [& args]
+(defn play-human-game []
   (loop [board (new-board)
          player-turn 1]
     (print "\033\143")
@@ -221,6 +229,57 @@
       (do
         (println "Game Over")
         (println (display-board board))))))
+
+(defn computer-move [board player-turn i]
+  ;; return board and true-reward
+  (if (valid-move? board (inc i))
+    [0 (play-move board player-turn (inc i))] ;; need to give true reward
+    [-1 board] ;; invalid move count as loss
+    ))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; value: float
+; reward: float
+; policy_logits: Dict[Action, float]
+; hidden_state: List[float]
+
+(defn dynamics-network []
+  ;; takes action, hidden-state
+  ;; returns reward, new hidden state
+  (network [18 81 10]))
+
+(defn prediction-network []
+  ;; takes hidden-state
+  ;; returns value, policy-logits
+  (network [9 81 10]))
+
+(defn representation []
+  ;; takes played-moves
+  ;; returns initial hidden-state
+  )
+
+(def initial-hidden-state [1 1 1 1 1 1 1 1 1])
+
+(defn print-main []
+  (let [pred-net (prediction-network)
+        dyn-net (dynamics-network)
+        board (new-board)
+        player-turn 1
+        [v & policy] (feedforward pred-net initial-hidden-state)
+        ranked-policy (sort-by second > (map-indexed vector policy))
+        action (index-max policy)
+        [reward & hidden-state] (feedforward dyn-net (concat (one-hot-encode action)
+                                                             initial-hidden-state))
+        [true-reward board] (computer-move board player-turn action)
+        ]
+   (display-board board)
+    ))
+
+(defn -main [& args]
+  (println (print-main)))
 
 ;; need a model
 
