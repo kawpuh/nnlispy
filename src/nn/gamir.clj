@@ -263,6 +263,21 @@
 
 (def initial-hidden-state [1 1 1 1 1 1 1 1 1])
 
+(def DISCOUNT 0.9)
+
+(defn play-game [pred-net dyn-net]
+  (loop [board (new-board)
+         player-turn 1
+         actions []]
+    (if (gameover? board) [board player-turn actions]
+      (let [[v & policy] (feedforward pred-net initial-hidden-state)
+            ranked-policy (sort-by second > (map-indexed vector policy))
+            action (index-max policy)
+            [reward & hidden-state] (feedforward dyn-net (concat (one-hot-encode action)
+                                                                 initial-hidden-state))
+            [true-reward board'] (computer-move board player-turn action)]
+        (recur board' (- player-turn) (conj actions action))))))
+
 (defn print-main []
   (let [pred-net (prediction-network)
         dyn-net (dynamics-network)
@@ -273,10 +288,8 @@
         action (index-max policy)
         [reward & hidden-state] (feedforward dyn-net (concat (one-hot-encode action)
                                                              initial-hidden-state))
-        [true-reward board] (computer-move board player-turn action)
-        ]
-   (display-board board)
-    ))
+        [true-reward board] (computer-move board player-turn action)]
+   (display-board board)))
 
 (defn -main [& args]
   (println (print-main)))
