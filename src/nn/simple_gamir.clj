@@ -39,63 +39,67 @@
 (defn sigmoid' [z]
   (* (sigmoid z) (- 1 (sigmoid z))))
 
+(defn tanh [z]
+  (let [e-2z (Math/exp (* 2 z))]
+    (/ (- e-2z 1) (+ e-2z 1))))
+
+(defn tanh' [z]
+  (- 1 (Math/pow (tanh z) 2)))
+
 ; (def cost-fn
-;   {:quadratic {:delta (fn [zm av yv] (m/mul (m/sub av yv) (m/emap sigmoid' zm)))}
+  ; {:quadratic {:delta (fn [zm av yv] (m/mul (m/sub av yv) (m/emap sigmoid' zm)))}
 ;    :cross-entropy {:delta (fn [_zm av yv] (m/sub av yv))}})
+
+(defn delta-L [zm av yv]
+  ;; MSE delta
+  (m/mul (m/sub av yv) (m/emap tanh' zm)))
+
+(defn mse [av yv]
+  (m/magnitude-squared (m/sub av yv)))
 
 (defn feedforward [[weights biases] xv] ; => yv
   (reduce
    (fn [av [wm bv]]
-     (m/emap sigmoid (m/add bv (m/inner-product wm av))))
+     (->>
+      (m/add bv (m/inner-product wm av))
+      (m/emap tanh)))
    xv
    (map vector weights biases)))
 
-; (defn backprop [[weights biases] [xv yv]] ; => [nabla-w nabla-b]
-;   (defn forward [] ; => [zm am]
-;     (reduce (fn [[zs as] [wm bv]]
-;               (let [zv (m/add bv (m/inner-product wm (last as)))]
-;                 [(conj zs zv) (conj as (m/emap sigmoid zv))]))
-;             [[] [xv]]
-;             (map vector weights biases)))
-;   (defn backward [[zm am]] ; => [nabla-w nabla-b]
-;     (let [r-zm (reverse zm)
-;           r-weights (reverse weights)
-;           r-am (reverse am)
-;           delta-0 ((get-in cost-fn [:cross-entropy :delta])
-;                    (first r-zm)
-;                    (first r-am)
-;                    yv)]
-;       (reduce (fn [[nabla-weights nabla-biases] [zv wm av]]
-;                 (let [delta- (first nabla-biases)
-;                       delta (m/mul
-;                              (m/inner-product (m/transpose wm) delta-)
-;                              (m/emap sigmoid' zv))]
-;                   [(conj nabla-weights (m/outer-product delta av))
-;                    (conj nabla-biases delta)]))
-;               ;; initial value
-;               [(list (m/outer-product delta-0 (second r-am)))
-;                (list delta-0)]
-;               ;; reduction coll
-;               (map vector
-;                    (rest r-zm)
-;                    r-weights
-;                    (drop 2 r-am)))))
-;   (-> (forward)
-;       (backward)))
+(defn backprop [[weights biases] xv yv] ; => [nabla-w nabla-b]
+  (defn forward [] ; => [zm am]
+    (reduce (fn [[zs as] [wm bv]]
+              (let [zv (m/add bv (m/inner-product wm (last as)))]
+                [(conj zs zv) (conj as (m/emap tanh zv))]))
+            [[] [xv]]
+            (map vector weights biases)))
+  (defn backward [[zm am]] ; => [nabla-w nabla-b]
+    (let [r-zm (reverse zm)
+          r-weights (reverse weights)
+          r-am (reverse am)
+          delta-0 (delta-L (first r-zm) (first r-am) yv)]
+      #_(clojure.pprint/pprint [(first r-zm) (first r-am) yv
+                                delta-0
+                                (mse (first r-am) yv)])
+      (reduce (fn [[nabla-weights nabla-biases] [zv wm av]]
+                (let [delta- (first nabla-biases)
+                      delta (m/mul
+                             (m/inner-product (m/transpose wm) delta-)
+                             (m/emap tanh' zv))]
+                  [(conj nabla-weights (m/outer-product delta av))
+                   (conj nabla-biases delta)]))
+              ;; initial value
+              [(list (m/outer-product delta-0 (second r-am)))
+               (list delta-0)]
+              ;; reduction coll
+              (map vector
+                   (rest r-zm)
+                   r-weights
+                   (drop 2 r-am)))))
+  (-> (forward)
+      (backward)))
 
-; (defn parameterize-mini-batch-fn [eta mini-batch-size scaled-reg-parameter]
-;   (let [nabla-scaling (- (/ eta mini-batch-size))
-;         l2-weight-scaling (- 1 (* eta scaled-reg-parameter))]
-;     (fn train-mini-batch [[weights biases] training-batch]
-;       (let [[nabla-weights nabla-biases]
-;             (reduce
-;              (fn nabla-sum [[nabla-weights nabla-biases] [dnabla-weights dnabla-biases]]
-;                [(pmap m/add nabla-weights dnabla-weights)
-;                 (map m/add nabla-biases dnabla-biases)])
-;              (pmap (partial backprop [weights biases]) training-batch))]
-;         [(pmap m/scale-add weights (repeat l2-weight-scaling)
-;                nabla-weights (repeat nabla-scaling))
-;          (map m/add-scaled biases nabla-biases (repeat nabla-scaling))]))))
+(def DISCOUNT 0.9)
 
 ; (defn sgd [[weights biases] training-data {:keys [epochs mini-batch-size eta lambda]}]
 ;   (defn do-epoch [[weights- biases-]]
@@ -112,18 +116,36 @@
   (first
    (apply max-key second (map-indexed vector output-vector))))
 
-; (defn evaluate [[weights biases] test-data]
-;   (mapv
-;    (fn [[x y]]
-;      (let [res (feedforward [weights biases] x)]
-;        [[(index-max res) (m/emax res)] (translate-output y)]))
-;    test-data))
+(defn top-n-index [n output-vector]
+  (take n (map first (sort-by second > (map-indexed vector output-vector)))))
 
 (defn one-hot-encode
   ([hot-i] (one-hot-encode hot-i 9))
   ([hot-i n]
    (for [i (range n)]
      (if (= i hot-i) 1 0))))
+
+(defn make-targets [reward actions]
+  (let [rewards (iterate (partial * DISCOUNT -1) reward)]
+    (map cons rewards (map one-hot-encode actions))))
+
+(defn test-backprop-prednet [pred-net reward states actions] ; => [nabla-w nabla-b]
+  (map (partial backprop pred-net) states (make-targets reward actions)))
+
+(defn parameterize-mini-batch-fn [eta mini-batch-size scaled-reg-parameter]
+  (let [nabla-scaling (- (/ eta mini-batch-size))
+        l2-weight-scaling (- 1 (* eta scaled-reg-parameter))]
+    (fn train-mini-batch [[weights biases] xvs yvs]
+      (let [[nabla-weights nabla-biases]
+            (reduce
+             (fn nabla-sum [[nabla-weights nabla-biases] [dnabla-weights dnabla-biases]]
+               [(pmap m/add nabla-weights dnabla-weights)
+                (map m/add nabla-biases dnabla-biases)])
+             (map (partial backprop [weights biases]) xvs yvs))]
+        [(pmap m/scale-add
+               weights (repeat l2-weight-scaling)
+               nabla-weights (repeat nabla-scaling))
+         (map m/add-scaled biases nabla-biases (repeat nabla-scaling))]))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Game Impl
@@ -183,7 +205,7 @@
 
 (defn play-move [[player-turn & _board :as state] i]
   (-> state
-      (assoc (inc i) player-turn)
+      (assoc (inc i) player-turn) ;; inc because 0 is playerturn
       (assoc 0 (- player-turn))))
 
 (defn reward [[player-turn & board]]
@@ -194,7 +216,7 @@
     0))
 
 (defn computer-move [[player-turn & board :as state] i]
-  ;; return state and true-reward
+  ;; return [true-reward state]
   (if (not (valid-move? board i))
     [-1 (concat [(- player-turn)] board)] ;; invalid move count as loss
     (let [state' (play-move state i)]
@@ -212,27 +234,72 @@
 (defn prediction-network []
   ;; takes state [player-turn & board]
   ;; returns value, policy-logits
-  (network [10 81 10]))
+  (network [10 324 10]))
 
 (defn pred-move [pred-net state]
   (let [[v & policy] (feedforward pred-net (concat state))
-        ranked-policy (sort-by second > (map-indexed vector policy))
-        action (index-max policy)]
-    action))
+        action-candidates (top-n-index 3 policy)]
+    (->> (map
+          (juxt identity
+                (fn [action]
+                  (let [[reward p-state] (computer-move state action)]
+                    (if (not= 0 reward) reward
+                        (first (feedforward pred-net p-state))))))
+          action-candidates)
+         (apply max-key second)
+         first)))
+
+(def K 3)
+(def N 3)
 
 (defn self-play [pred-net]
-  (let [pred-net pred-net]
-    (loop [state (new-state)]
-      (if (draw? state) [0 state]
-          (let [action (pred-move pred-net state)
-                [true-reward state'] (computer-move state action)]
-            (if (not= 0 true-reward) [true-reward state']
-                (recur state')))))))
+  (loop [true-reward 0
+         [[turn & board :as state] & past-states :as states] (list (new-state))
+         actions (list)]
+    (println true-reward actions)
+    (if (or (not= 0 true-reward) (draw? board)) [true-reward past-states actions]
+        (let [action (pred-move pred-net state)
+              [true-reward state'] (computer-move state action)]
+          (recur true-reward (conj states state') (conj actions action))))))
+
+; {:epochs 60
+;  :mini-batch-size 10
+;  :eta 0.2
+;  :lambda 5.0}
+
+(defn train-until-length []
+  (loop [net (prediction-network)
+         i 0]
+    (let [[reward states actions] (self-play net)
+          ; res (test-backprop-prednet net reward states actions)
+          mini-batch-fn (parameterize-mini-batch-fn 0.0008 1 1.0)
+          trained-net (mini-batch-fn net states (make-targets reward actions))
+          game-length (count actions)]
+      (println actions)
+      (println game-length i)
+      (recur trained-net (inc i))
+
+      #_(if (> game-length 3)
+          trained-net
+          (recur trained-net (inc i))))))
 
 (defn -main [& args]
-  (let [[reward state] (self-play (prediction-network))]
-    (println "result:" reward)
-    (print-state state)))
+  ; (train-until-length)
+  (self-play (prediction-network))
+  ; (println (pred-move (prediction-network) (new-state)))
+  (println "done")
+  #_(let [net (prediction-network)
+          [reward states actions] (self-play net)
+          res (backprop-prednet net reward states actions)
+          mini-batch-fn (parameterize-mini-batch-fn 0.2 1 1.0)
+          trained-net (mini-batch-fn net states (make-targets reward actions))]
+      (println "done")
+      (clojure.pprint/pprint @write-atom)
+    ; (println (m/shape res))
+    ; (println "actions:" actions)
+    ; (println "result:" reward)
+      #_(doseq [state states]
+          (print-state state))))
 
 ;; need a model
 
