@@ -1,13 +1,7 @@
-(ns simple-gamir
+(ns tic-tac-toe
   (:require
    [clojure.core.matrix :as m]
    [clojure.core.matrix.random :as rand]
-    ; [meta-csv.core :as csv]
-    ; [denisovan.core]
-    ; [clatrix.core]
-    ; [clojure.core.async :as async]
-    ; [clojure.java.io :as io]
-    ; [tech.v3.datatype.char-input :as ch]
    [clojure.pprint :as pp]))
 
 ; (m/set-current-implementation :vectorz)
@@ -141,7 +135,7 @@
              (fn nabla-sum [[nabla-weights nabla-biases] [dnabla-weights dnabla-biases]]
                [(pmap m/add nabla-weights dnabla-weights)
                 (map m/add nabla-biases dnabla-biases)])
-             (map (partial backprop [weights biases]) xvs yvs))]
+             (pmap (partial backprop [weights biases]) xvs yvs))]
         [(pmap m/scale-add
                weights (repeat l2-weight-scaling)
                nabla-weights (repeat nabla-scaling))
@@ -208,7 +202,8 @@
       (assoc (inc i) player-turn) ;; inc because 0 is playerturn
       (assoc 0 (- player-turn))))
 
-(defn reward [[player-turn & board]]
+(defn reward [[_ & board] player-turn]
+  ;; most of the time
   (if (some #(= % [player-turn player-turn player-turn])
             (map (fn [[i j k]] [(nth board i) (nth board j) (nth board k)])
                  [[0 1 2] [3 4 5] [6 7 8] [0 3 6] [1 4 7] [2 5 8] [0 4 8] [2 4 6]]))
@@ -220,7 +215,7 @@
   (if (not (valid-move? board i))
     [-1 (concat [(- player-turn)] board)] ;; invalid move count as loss
     (let [state' (play-move state i)]
-      [(reward state') state'])))
+      [(reward state' player-turn) state'])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -238,7 +233,7 @@
 
 (defn pred-move [pred-net state]
   (let [[v & policy] (feedforward pred-net (concat state))
-        action-candidates (top-n-index 3 policy)]
+        action-candidates (top-n-index 6 policy)]
     (->> (map
           (juxt identity
                 (fn [action]
@@ -249,25 +244,16 @@
          (apply max-key second)
          first)))
 
-(def K 3)
-(def N 3)
-
 (defn self-play [pred-net]
   (loop [true-reward 0
          [[turn & board :as state] & past-states :as states] (list (new-state))
          actions (list)]
-    (println true-reward actions)
     (if (or (not= 0 true-reward) (draw? board)) [true-reward past-states actions]
         (let [action (pred-move pred-net state)
               [true-reward state'] (computer-move state action)]
           (recur true-reward (conj states state') (conj actions action))))))
 
-; {:epochs 60
-;  :mini-batch-size 10
-;  :eta 0.2
-;  :lambda 5.0}
-
-(defn train-until-length []
+(defn simple-train []
   (loop [net (prediction-network)
          i 0]
     (let [[reward states actions] (self-play net)
@@ -275,31 +261,19 @@
           mini-batch-fn (parameterize-mini-batch-fn 0.0008 1 1.0)
           trained-net (mini-batch-fn net states (make-targets reward actions))
           game-length (count actions)]
-      (println actions)
-      (println game-length i)
-      (recur trained-net (inc i))
-
-      #_(if (> game-length 3)
-          trained-net
-          (recur trained-net (inc i))))))
+      (println reward actions game-length i)
+      (recur trained-net (inc i)))))
 
 (defn -main [& args]
-  ; (train-until-length)
-  (self-play (prediction-network))
-  ; (println (pred-move (prediction-network) (new-state)))
-  (println "done")
+  (simple-train)
   #_(let [net (prediction-network)
           [reward states actions] (self-play net)
           res (backprop-prednet net reward states actions)
           mini-batch-fn (parameterize-mini-batch-fn 0.2 1 1.0)
           trained-net (mini-batch-fn net states (make-targets reward actions))]
-      (println "done")
       (clojure.pprint/pprint @write-atom)
     ; (println (m/shape res))
     ; (println "actions:" actions)
     ; (println "result:" reward)
       #_(doseq [state states]
           (print-state state))))
-
-;; need a model
-
